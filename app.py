@@ -3,6 +3,8 @@ from openai import OpenAI
 from dotenv import load_dotenv
 from time import sleep
 import os
+from helpers import *
+from selecionar_persona import *
 
 load_dotenv()
 
@@ -12,15 +14,28 @@ modelo = "gpt-3.5-turbo"
 app = Flask(__name__)
 app.secret_key = 'alura'
 
+contexto = carrega('./dados/ecomart.txt')
+
 def bot(prompt):
     maximo_tentativas = 1
     repeticoes = 0
 
+    # Seleciona a persona conforme a resposta da OpenAI
+    person = persons[select_person(prompt)]
+
     while True:
         try:
-            prompt_do_sistema = """
+            prompt_do_sistema = f"""
                 Você é um chatbot de atendimento a clientes de um e-comerce.
                 Você não deve responder perguntas que não sejam dados do e-comerce informado!
+                Você deve gerar respostas utilizando o contexto abaixo.
+                Você deve adotar a persona abaixo.
+
+                # Contexto:
+                {contexto}
+
+                # Personalidade:
+                {person}
             """
 
             response = cliente.chat.completions.create(
@@ -35,7 +50,7 @@ def bot(prompt):
                     }
                 ],
                 temperature=1,
-                max_tokens=256,
+                max_tokens=300,
                 top_p=1,
                 frequency_penalty=0,
                 presence_penalty=0,
