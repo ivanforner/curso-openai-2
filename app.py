@@ -5,6 +5,7 @@ from time import sleep
 import os
 from helpers import *
 from selecionar_persona import *
+from selecionar_documento import *
 
 load_dotenv()
 
@@ -14,14 +15,16 @@ modelo = "gpt-3.5-turbo"
 app = Flask(__name__)
 app.secret_key = 'alura'
 
-contexto = carrega('./dados/ecomart.txt')
-
 def bot(prompt):
     maximo_tentativas = 1
     repeticoes = 0
 
     # Seleciona a persona conforme a resposta da OpenAI
     person = persons[select_person(prompt)]
+
+    # Seleciona o contexto com base na resposta da OpenAI
+    context = select_context(prompt)
+    selected_doc = select_document(context)
 
     while True:
         try:
@@ -32,7 +35,7 @@ def bot(prompt):
                 Você deve adotar a persona abaixo.
 
                 # Contexto:
-                {contexto}
+                {selected_doc}
 
                 # Personalidade:
                 {person}
