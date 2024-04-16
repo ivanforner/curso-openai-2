@@ -6,61 +6,91 @@ import os
 from helpers import *
 from selecionar_persona import *
 from selecionar_documento import *
+from assistente_ecomart import *
 
 load_dotenv()
 
 cliente = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-modelo = "gpt-3.5-turbo"
+modelo = "gpt-4-turbo"
 
 app = Flask(__name__)
 app.secret_key = 'alura'
+
+assistant = pegar_json()
+thread_id = assistant['thread_id']
+assistant_id = assistant['assistant_id']
+file_ids = assistant['file_ids']
+
+STATUS_COMPLETED = 'completed'
+STATUS_REQUIRES_ACTION = 'requires_action'
 
 def bot(prompt):
     maximo_tentativas = 1
     repeticoes = 0
 
-    # Seleciona a persona conforme a resposta da OpenAI
-    person = persons[select_person(prompt)]
-
-    # Seleciona o contexto com base na resposta da OpenAI
-    context = select_context(prompt)
-    selected_doc = select_document(context)
-
     while True:
         try:
-            prompt_do_sistema = f"""
-                Você é um chatbot de atendimento a clientes de um e-comerce.
-                Você não deve responder perguntas que não sejam dados do e-comerce informado!
-                Você deve gerar respostas utilizando o contexto abaixo.
-                Você deve adotar a persona abaixo.
+            personalidade = persons[select_person(prompt)]
 
-                # Contexto:
-                {selected_doc}
+            client.beta.threads.messages.create(
+                thread_id=thread_id,
+                role="user",
+                content=f'''
+                    Assuma, de agora em diante, a personalidade abaixo
+                    Ignore as personalidades anteriores
 
-                # Personalidade:
-                {person}
-            """
-
-            response = cliente.chat.completions.create(
-                messages=[
-                    {
-                        'role': 'system',
-                        'content': prompt_do_sistema
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ],
-                temperature=1,
-                max_tokens=300,
-                top_p=1,
-                frequency_penalty=0,
-                presence_penalty=0,
-                model=modelo
+                    # Persona:
+                    {personalidade}
+                ''',
+                file_ids=file_ids
             )
 
+            client.beta.threads.messages.create(
+                thread_id=thread_id,
+                role='user',
+                content=prompt,
+                file_ids=file_ids
+            )
+
+            run = client.beta.threads.runs.create(
+                thread_id=thread_id,
+                assistant_id=assistant_id,
+            )
+
+            while run.status != STATUS_COMPLETED:
+                run = client.beta.threads.runs.retrieve(
+                    thread_id=thread_id,
+                    run_id=run.id
+                )
+
+                print(f"Status: {run.status}")
+
+                if run.status == STATUS_REQUIRES_ACTION:
+                    tools_adicionadas = run.required_action.submit_tool_outputs.tool_calls
+                    respostas_tools_acionadas = []
+                    for tool in tools_adicionadas:
+                        nome_funcao = tool.function.name
+                        funcao_escolhida = minhas_funcoes[nome_funcao]
+                        argumentos = json.loads(tool.function.arguments)
+                        
+                        print(argumentos)
+                        
+                        resposta_funcao = funcao_escolhida(argumentos)
+                        respostas_tools_acionadas.append({
+                            "tool_call_id": tool.id,
+                            "output": resposta_funcao
+                        })
+                    
+                    run = client.beta.threads.runs.submit_tool_outputs(
+                        thread_id=thread_id,
+                        run_id=run.id,
+                        tool_outputs=respostas_tools_acionadas
+                    )
+
+            historic = list(client.beta.threads.messages.list(thread_id=thread_id).data)
+            response = historic[0]
             return response
+
         except Exception as erro:
             repeticoes += 1
             if repeticoes >= maximo_tentativas:
@@ -72,7 +102,8 @@ def bot(prompt):
 def chat():
     prompt = request.json["msg"]
     resposta = bot(prompt)
-    texto_resposta = resposta.choices[0].message.content
+    print(resposta)
+    texto_resposta = resposta.content[0].text.value
     return texto_resposta
 
 
